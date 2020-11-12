@@ -1,0 +1,234 @@
+
+--------------------------------------------------------------------------------
+--										DEVICES VERIFICATION                                     --
+--------------------------------------------------------------------------------
+
+-- MAIN Module
+
+-- This code analyzes the mechanism of verification of devices
+-- through the functionality of the MQTT protocol: keep-alive, LWT and Persistent Session
+
+-- In this variant the devices and the broker do not take care of the connection
+-- and forwarding of messages, but of the verification and disconnection of devices
+
+MODULE main
+
+VAR
+
+-- Instances declaration
+
+-- Broker
+user_broker : broker(device_1,
+					    keep_alive_time);
+
+-- device
+device_1 : device(keep_alive_time,
+				  user_broker.pingresp,
+				  user_broker.active_clients[1],
+				  check_device_1);
+
+keep_alive_time : 0..2;
+
+-- PROPERTY DEFINITION
+
+-- SAFETY
+
+-- If the broker goes in down state, then the whole system must react by going to
+-- stop the connection.
+-- The ping message is not sent and the client understands that the connection is failed.
+-- This situation must always verify, in every state following the improper termination of the broker.
+CTLSPEC (user_broker.phase = down) -> AX ((user_broker.pingresp = unsent) & (device_1.connection_failure = TRUE) &
+	                                      (device_1.state = end))
+
+-- If the client goes in failure state, then the broker must delete the connection.
+-- When the client goes in failure state can't send the pingreq message and consequently
+-- the broker doesn't process the pingresp message.
+CTLSPEC (device_1.state = failure) -> AX ((device_1.pingreq = unsent) & (user_broker.pingresp = undefined) &
+	                                      (user_broker.connection_failure[1] = TRUE))
+
+-- LWT message check.
+-- If the LWT message is set to true and there is an abnormal disconnection, it must be send.
+LTLSPEC G (user_broker.send_lwt_message[1] = TRUE -> (device_1.lwt = true & user_broker.connection_failure[1] = TRUE))
+
+-- Pingreq message is send when the client is active and the keep-alive time is expires.
+LTLSPEC (device_1.pingreq = sent) -> Y (keep_alive_time = 0 & device_1.state = idle & device_1.connection_failure = FALSE)
+
+-- Pingresp message is send when the pingreq message was delivered and the broker is active.
+LTLSPEC (user_broker.pingresp = sent) -> Y (device_1.pingreq = sent & user_broker.phase = active)
+
+-- For each state where the broker is in down phase, there is at least one state where
+-- to the next step the verification is successfull. Must be FALSE.
+CTLSPEC AG (user_broker.phase = down -> EX (check_device_1 = TRUE))
+
+-- LIVENESS
+
+-- If the device is active then there is an intermediate state where is verified correctly.
+-- (Obviously the broker must be active).
+LTLSPEC G ((device_1.state = idle & user_broker.phase = active & keep_alive_time = 0) -> F (check_device_1 = TRUE))
+
+-- If the device doesn't send the ping message then the broker must disconnect it.
+LTLSPEC G ((device_1.pingreq = unsent) -> F (user_broker.connection_failure[1] = TRUE & device_1.state = end))
+
+-- FAIRNESS
+
+-- The timer eventually must expire if there isn't an abnormal interruption.
+-- verified through the STRONG FAIRNESS
+LTLSPEC  G (device_1.connection_failure = FALSE & user_broker.connection_failure[1] = FALSE) -> F (keep_alive_time = 0)
+
+ASSIGN
+
+init(keep_alive_time) := 2;
+next(keep_alive_time) :=
+case
+	-- When the client is in idle state it does nothing, then the timer will be activate
+	device_1.state = idle & keep_alive_time = 2 : 1;
+	keep_alive_time = 1 : 0;
+
+	-- When the verification of the devices ends, timer resets to three.
+	(check_device_1 = TRUE) | (device_1.state = end & device_1.pingreq = unsent) : 2;
+
+	TRUE : keep_alive_time;
+esac;
+
+-- CONST Definition
+
+-- When the device is verified correctly, this constant is set to true
+DEFINE check_device_1 := (user_broker.pingresp = sent ? TRUE : FALSE);
+
+-- This constant identify the state where the device has had an abnormal interruption
+-- and the broker send the LWT message
+DEFINE start_lwt_procedure_device_1 := (device_1.pingreq = unsent & device_1.lwt = true ? TRUE : FALSE);
+
+--------------------------------------------------------------------------------
+--                            DEVICE																					--
+--------------------------------------------------------------------------------
+
+-- Device module
+MODULE device(time, broker_pingresp, client_active_in_broker, check_dev)
+
+VAR
+
+state : {init_device, end, idle, failure};
+
+lwt : {undefined, true, false};
+
+pingreq : {undefined, sent, unsent};
+
+-- This variable specifies that the broker doesn't response at ping request,
+-- so there has been an abnormal disconnection
+connection_failure : boolean;
+
+ASSIGN
+
+-- PINGREQ
+init(pingreq) := undefined;
+next(pingreq) :=
+case
+	-- reset
+	pingreq != undefined : undefined;
+
+	-- The device is active and send the pingreq message
+	pingreq = undefined & time = 0 & state = idle & broker_pingresp = undefined : sent;
+
+	-- The device can't send the pingreq message
+	pingreq = undefined & time = 0 & (state = failure | state = end) : unsent;
+
+	TRUE : pingreq;
+esac;
+
+init(connection_failure) := FALSE;
+next(connection_failure) :=
+case
+	time = 0 & broker_pingresp = sent : FALSE;
+	time = 0 & broker_pingresp = unsent : TRUE;
+
+	TRUE : connection_failure;
+esac;
+
+-- STATE
+init(state) := {init_device};
+next(state) :=
+	case
+
+		-- When the client has been initialized, it must go in an idle state;
+		-- which means that it processing certain operations that will not be taken
+		-- into consideration in this version.
+		state = init_device : idle;
+
+		-- When the device suffers an error or the broker doesn't active, the state
+		-- must set to "down"
+		state = failure | connection_failure = TRUE : end;
+
+		-- Anytime the device could do 3 operations: stay in idle state,
+		-- go in a failure state, goes in disconnect state.
+		state = idle & pingreq = undefined & broker_pingresp = undefined & time != 0 : {idle, failure};
+
+		TRUE : state;
+	esac;
+
+init(lwt) := undefined;
+next(lwt) :=
+case
+	lwt = undefined : {true,false};
+	TRUE : lwt;
+esac;
+--------------------------------------------------------------------------------
+--                             BROKER                                         --
+--------------------------------------------------------------------------------
+
+-- Broker module
+MODULE broker(dev_1, time_1)
+
+VAR
+
+-- Pingresp message
+pingresp : {undefined, sent, unsent};
+
+-- Array that contains the failed connections.
+connection_failure : array 1..1 of boolean;
+
+-- Array that contains the instance of active clients
+-- active_clients : array 1..1 of {undefined, true, false};
+
+-- Broker states
+phase : {active, down};
+
+send_lwt_message : array 1..1 of boolean;
+
+ASSIGN
+
+init(pingresp) := undefined;
+next(pingresp) :=
+case
+		-- reset
+	pingresp != undefined : undefined;
+
+	-- The broker is active and receives the pingreq message, then response with
+	-- the pingresp message.
+	pingresp = undefined & dev_1.pingreq = sent & phase = active : sent;
+	pingresp = undefined & dev_1.pingreq = sent & phase = down : unsent;
+
+	TRUE : pingresp;
+esac;
+
+init(connection_failure[1]) := FALSE;
+next(connection_failure[1]) :=
+case
+	dev_1.pingreq = unsent : TRUE;
+	TRUE : connection_failure[1];
+esac;
+
+init(phase) := active;
+next(phase) :=
+case
+	phase = active & time_1 != 0 : {active, down};
+	TRUE : phase;
+esac;
+
+init(send_lwt_message[1]) := FALSE;
+next(send_lwt_message[1]) :=
+case
+	send_lwt_message[1] = FALSE & dev_1.pingreq = unsent & dev_1.lwt = true & phase = active : TRUE;
+	send_lwt_message[1] = TRUE : FALSE;
+	TRUE : send_lwt_message[1];
+esac;
