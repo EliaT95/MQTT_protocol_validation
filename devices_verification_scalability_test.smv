@@ -1,0 +1,342 @@
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--				          System scalability Test                                   --
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+MODULE main
+
+VAR
+
+-- Instances declaration
+
+-- Broker
+user_broker : broker(device_1,
+					 keep_alive_time_dev_1,
+					 device_2,
+					 keep_alive_time_dev_2,
+					 device_3,
+					 keep_alive_time_dev_3,
+					 device_4,
+					 keep_alive_time_dev_4,
+					 device_5,
+					 keep_alive_time_dev_5);
+
+-- Device
+device_1 : device(keep_alive_time_dev_1,
+				  user_broker.pingresp[1],
+				  check_device_1);
+
+device_2 : device(keep_alive_time_dev_2,
+				  user_broker.pingresp[2],
+				  check_device_2);
+
+device_3 : device(keep_alive_time_dev_3,
+			      user_broker.pingresp[3],
+			      check_device_3);
+
+device_4 : device(keep_alive_time_dev_4,
+	              user_broker.pingresp[4],
+	              check_device_4);
+
+device_5 : device(keep_alive_time_dev_5,
+	              user_broker.pingresp[5],
+	              check_device_5);
+
+-- Keep-alive time is set indipendent for each device
+keep_alive_time_dev_1 : 0..1;
+keep_alive_time_dev_2 : 0..2;
+keep_alive_time_dev_3 : 0..3;
+keep_alive_time_dev_4 : 0..4;
+keep_alive_time_dev_5 : 0..5;
+
+-- Property Definition
+
+-- SAFETY
+
+-- Pingreq message is sent when the client is active and the keep-alive time expires
+LTLSPEC (device_1.pingreq = sent) -> Y (keep_alive_time_dev_1 = 0 & device_1.state = idle)
+LTLSPEC (device_2.pingreq = sent) -> Y (keep_alive_time_dev_2 = 0 & device_2.state = idle)
+LTLSPEC (device_3.pingreq = sent) -> Y (keep_alive_time_dev_3 = 0 & device_3.state = idle)
+LTLSPEC (device_4.pingreq = sent) -> Y (keep_alive_time_dev_4 = 0 & device_4.state = idle)
+LTLSPEC (device_5.pingreq = sent) -> Y (keep_alive_time_dev_5 = 0 & device_5.state = idle)
+
+-- Same thing	for the pingresp
+LTLSPEC (user_broker.pingresp[1] = sent) -> Y (device_1.pingreq = sent & user_broker.phase = active)
+LTLSPEC (user_broker.pingresp[2] = sent) -> Y (device_2.pingreq = sent & user_broker.phase = active)
+LTLSPEC (user_broker.pingresp[3] = sent) -> Y (device_3.pingreq = sent & user_broker.phase = active)
+LTLSPEC (user_broker.pingresp[4] = sent) -> Y (device_4.pingreq = sent & user_broker.phase = active)
+LTLSPEC (user_broker.pingresp[5] = sent) -> Y (device_5.pingreq = sent & user_broker.phase = active)
+
+-- If the broker is active and receives the pingreq message, then it must always
+-- send the pingresp message; otherwise the functional characteristics of the
+-- protocol aren't observed.
+CTLSPEC AG ((user_broker.phase = active & keep_alive_time_dev_1 = 0 & device_1.pingreq = sent)
+        -> AX (user_broker.pingresp[1] = sent))
+CTLSPEC AG ((user_broker.phase = active & keep_alive_time_dev_2 = 0 & device_2.pingreq = sent)
+        -> AX (user_broker.pingresp[2] = sent))
+CTLSPEC AG ((user_broker.phase = active & keep_alive_time_dev_3 = 0 & device_3.pingreq = sent)
+        -> AX (user_broker.pingresp[3] = sent))
+CTLSPEC AG ((user_broker.phase = active & keep_alive_time_dev_4 = 0 & device_4.pingreq = sent)
+        -> AX (user_broker.pingresp[4] = sent))
+CTLSPEC AG ((user_broker.phase = active & keep_alive_time_dev_5 = 0 & device_5.pingreq = sent)
+        -> AX (user_broker.pingresp[5] = sent))
+
+-- Conflicts check
+
+-- Device_1 send ping message to broker. The broker send pingresp message to other client
+-- It must to be FALSE.
+LTLSPEC G (device_1.pingreq = sent & keep_alive_time_dev_1 = 0 &
+	       (device_2.pingreq = undefined & keep_alive_time_dev_2 != 0) |
+	       (device_3.pingreq = undefined & keep_alive_time_dev_3 != 0) |
+	       (device_4.pingreq = undefined & keep_alive_time_dev_4 != 0) |
+	       (device_5.pingreq = undefined & keep_alive_time_dev_5 != 0)
+        -> (user_broker.pingresp[1] = undefined &
+        	(user_broker.pingresp[2] = sent |
+             user_broker.pingresp[3] = sent |
+             user_broker.pingresp[4] = sent |
+             user_broker.pingresp[5] = sent)))
+
+LTLSPEC G (device_2.pingreq = sent & keep_alive_time_dev_2 = 0 &
+	       (device_1.pingreq = undefined & keep_alive_time_dev_1 != 0) |
+	       (device_3.pingreq = undefined & keep_alive_time_dev_3 != 0) |
+	       (device_4.pingreq = undefined & keep_alive_time_dev_4 != 0) |
+	       (device_5.pingreq = undefined & keep_alive_time_dev_5 != 0)
+        -> (user_broker.pingresp[2] = undefined &
+        	(user_broker.pingresp[1] = sent |
+             user_broker.pingresp[3] = sent |
+             user_broker.pingresp[4] = sent |
+             user_broker.pingresp[5] = sent)))
+
+LTLSPEC G (device_3.pingreq = sent & keep_alive_time_dev_3 = 0 &
+	       (device_2.pingreq = undefined & keep_alive_time_dev_2 != 0) |
+	       (device_1.pingreq = undefined & keep_alive_time_dev_1 != 0) |
+	       (device_4.pingreq = undefined & keep_alive_time_dev_4 != 0) |
+	       (device_5.pingreq = undefined & keep_alive_time_dev_5 != 0)
+        -> (user_broker.pingresp[3] = undefined &
+        	(user_broker.pingresp[2] = sent |
+             user_broker.pingresp[1] = sent |
+             user_broker.pingresp[4] = sent |
+             user_broker.pingresp[5] = sent)))
+
+LTLSPEC G (device_4.pingreq = sent & keep_alive_time_dev_4 = 0 &
+	       (device_2.pingreq = undefined & keep_alive_time_dev_2 != 0) |
+	       (device_3.pingreq = undefined & keep_alive_time_dev_3 != 0) |
+	       (device_1.pingreq = undefined & keep_alive_time_dev_1 != 0) |
+	       (device_5.pingreq = undefined & keep_alive_time_dev_5 != 0)
+        -> (user_broker.pingresp[4] = undefined &
+        	(user_broker.pingresp[2] = sent |
+             user_broker.pingresp[3] = sent |
+             user_broker.pingresp[1] = sent |
+             user_broker.pingresp[5] = sent)))
+
+LTLSPEC G (device_5.pingreq = sent & keep_alive_time_dev_5 = 0 &
+	       (device_2.pingreq = undefined & keep_alive_time_dev_2 != 0) |
+	       (device_3.pingreq = undefined & keep_alive_time_dev_3 != 0) |
+	       (device_4.pingreq = undefined & keep_alive_time_dev_4 != 0) |
+	       (device_1.pingreq = undefined & keep_alive_time_dev_1 != 0)
+        -> (user_broker.pingresp[5] = undefined &
+        	(user_broker.pingresp[2] = sent |
+             user_broker.pingresp[3] = sent |
+             user_broker.pingresp[4] = sent |
+             user_broker.pingresp[1] = sent)))
+
+-- LIVENESS
+
+-- If the device is active, then it will be an intermidate state in which
+-- it is verified correctly by the broker. (Obviously the broker must be active)
+LTLSPEC G ((device_1.state = idle & user_broker.phase = active & keep_alive_time_dev_1 = 0) -> F (check_device_1 = TRUE))
+LTLSPEC G ((device_2.state = idle & user_broker.phase = active & keep_alive_time_dev_2 = 0) -> F (check_device_2 = TRUE))
+LTLSPEC G ((device_3.state = idle & user_broker.phase = active & keep_alive_time_dev_3 = 0) -> F (check_device_3 = TRUE))
+LTLSPEC G ((device_4.state = idle & user_broker.phase = active & keep_alive_time_dev_4 = 0) -> F (check_device_4 = TRUE))
+LTLSPEC G ((device_5.state = idle & user_broker.phase = active & keep_alive_time_dev_5 = 0) -> F (check_device_5 = TRUE))
+
+-- FAIRNESS
+
+-- If there isn't abnormal interruptions, the timer, sooner or later, must expire.
+-- This verification is made with STRONG FAIRNESS
+LTLSPEC  G (device_1.state = idle & user_broker.phase = active) -> F (keep_alive_time_dev_1 = 0)
+LTLSPEC  G (device_2.state = idle & user_broker.phase = active) -> F (keep_alive_time_dev_2 = 0)
+LTLSPEC  G (device_3.state = idle & user_broker.phase = active) -> F (keep_alive_time_dev_3 = 0)
+LTLSPEC  G (device_4.state = idle & user_broker.phase = active) -> F (keep_alive_time_dev_4 = 0)
+LTLSPEC  G (device_5.state = idle & user_broker.phase = active) -> F (keep_alive_time_dev_5 = 0)
+
+ASSIGN
+
+init(keep_alive_time_dev_1) := 1;
+next(keep_alive_time_dev_1) :=
+case
+	-- When the client is in idle state does nothing. The timer goes off
+	device_1.state = idle & keep_alive_time_dev_1 = 1 : 0;
+
+ 	-- when devices check is terminated, The timer goes back to 3
+	(check_device_1 = TRUE)	: 1;
+
+	TRUE : keep_alive_time_dev_1;
+esac;
+
+init(keep_alive_time_dev_2) := 2;
+next(keep_alive_time_dev_2) :=
+case
+	device_2.state = idle & keep_alive_time_dev_2 = 2 : 1;
+	device_2.state = idle & keep_alive_time_dev_2 = 1 : 0;
+	(check_device_2 = TRUE)	 : 2;
+	TRUE : keep_alive_time_dev_2;
+esac;
+
+init(keep_alive_time_dev_3) := 3;
+next(keep_alive_time_dev_3) :=
+case
+	device_3.state = idle & keep_alive_time_dev_3 = 3 : 2;
+	device_3.state = idle & keep_alive_time_dev_3 = 2 : 1;
+	device_3.state = idle & keep_alive_time_dev_3 = 1 : 0;
+	(check_device_3 = TRUE)	: 3;
+	TRUE : keep_alive_time_dev_3;
+esac;
+
+init(keep_alive_time_dev_4) := 4;
+next(keep_alive_time_dev_4) :=
+case
+	device_4.state = idle & keep_alive_time_dev_4 = 4 : 3;
+	device_4.state = idle & keep_alive_time_dev_4 = 3 : 2;
+	device_4.state = idle & keep_alive_time_dev_4 = 2 : 1;
+	device_4.state = idle & keep_alive_time_dev_4 = 1 : 0;
+	(check_device_4 = TRUE)	: 4;
+	TRUE : keep_alive_time_dev_4;
+esac;
+
+init(keep_alive_time_dev_5) := 5;
+next(keep_alive_time_dev_5) :=
+case
+	device_5.state = idle & keep_alive_time_dev_5 = 5 : 4;
+	device_5.state = idle & keep_alive_time_dev_5 = 4 : 3;
+	device_5.state = idle & keep_alive_time_dev_5 = 3 : 2;
+	device_5.state = idle & keep_alive_time_dev_5 = 2 : 1;
+	device_5.state = idle & keep_alive_time_dev_5 = 1 : 0;
+	(check_device_5 = TRUE)	: 5;
+	TRUE : keep_alive_time_dev_5;
+esac;
+
+DEFINE check_device_1 := (user_broker.pingresp[1] = sent ? TRUE : FALSE);
+DEFINE check_device_2 := (user_broker.pingresp[2] = sent ? TRUE : FALSE);
+DEFINE check_device_3 := (user_broker.pingresp[3] = sent ? TRUE : FALSE);
+DEFINE check_device_4 := (user_broker.pingresp[4] = sent ? TRUE : FALSE);
+DEFINE check_device_5 := (user_broker.pingresp[5] = sent ? TRUE : FALSE);
+
+----------------------------------------------------------------------------------------------------------------
+----------------------------------------DEVICE------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------
+
+-- Device module
+MODULE device(time, broker_pingresp, check_dev)
+
+VAR
+
+-- Device state
+state : {init_device, idle};
+
+-- "last Will and Message"
+lwt : {undefined, false};
+
+pingreq : {undefined, sent};
+
+ASSIGN
+
+-- PINGREQ
+init(pingreq) := undefined;
+next(pingreq) :=
+case
+	-- reset
+	pingreq != undefined : undefined;
+
+	-- Device is active and send the pingreq message
+	pingreq = undefined & time = 0 & state = idle & broker_pingresp = undefined : sent;
+
+	TRUE : pingreq;
+esac;
+
+-- STATE
+init(state) := {init_device};
+next(state) :=
+	case
+
+		-- When you initialize the client, it immediately goes into idle. (which means it is running
+		-- certain operations that will not be taken into account in this version of the code)
+		state = init_device : idle;
+
+		state = idle & pingreq = undefined & broker_pingresp = undefined : idle;
+
+		TRUE : state;
+	esac;
+
+init(lwt) := undefined;
+next(lwt) :=
+case
+	lwt = undefined : false;
+	TRUE : lwt;
+esac;
+----------------------------------------------------------------------------------------------------
+-------------------------------BROKER---------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
+
+MODULE broker(dev_1, time_1, dev_2, time_2, dev_3, time_3, dev_4, time_4, dev_5, time_5)
+
+VAR
+
+-- Pingresp array
+pingresp : array 1..5 of {undefined, sent};
+
+-- Broker states
+phase : {active, down};
+
+ASSIGN
+
+init(pingresp[1]) := undefined;
+next(pingresp[1]) :=
+case
+	-- reset
+	pingresp[1] != undefined : undefined;
+
+  -- When the broker is active and receive the pingreq message it sends the pingresp message
+	pingresp[1] = undefined & dev_1.pingreq = sent & phase = active : sent;
+	TRUE : pingresp[1];
+esac;
+
+init(pingresp[2]) := undefined;
+next(pingresp[2]) :=
+case
+	pingresp[2] != undefined : undefined;
+	pingresp[2] = undefined & dev_2.pingreq = sent & phase = active : sent;
+	TRUE : pingresp[2];
+esac;
+
+init(pingresp[3]) := undefined;
+next(pingresp[3]) :=
+case
+	pingresp[3] != undefined : undefined;
+	pingresp[3] = undefined & dev_3.pingreq = sent & phase = active : sent;
+	TRUE : pingresp[3];
+esac;
+
+init(pingresp[4]) := undefined;
+next(pingresp[4]) :=
+case
+	pingresp[4] != undefined : undefined;
+	pingresp[4] = undefined & dev_4.pingreq = sent & phase = active : sent;
+	TRUE : pingresp[4];
+esac;
+
+init(pingresp[5]) := undefined;
+next(pingresp[5]) :=
+case
+	pingresp[5] != undefined : undefined;
+	pingresp[5] = undefined & dev_5.pingreq = sent & phase = active : sent;
+	TRUE : pingresp[5];
+esac;
+
+init(phase) := active;
+next(phase) :=
+case
+	phase = active : active;
+	TRUE : phase;
+esac;
